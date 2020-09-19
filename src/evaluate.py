@@ -88,8 +88,7 @@ if __name__ == '__main__':
         repo_dir = user_task_dir / pr_data['head']['repo']['name']
 
         if not repo_dir.exists():
-            repo = git.Git(user_task_dir).clone(repo_git_url)
-            repo.git.checkout(task)
+            repo = git.Repo.clone_from(repo_git_url, repo_dir, branch=task)
             repo.git.pull()
             print("    cloned!")
         else:
