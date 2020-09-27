@@ -15,11 +15,26 @@ def load_json(url):
     return json.loads(data)
 
 
-def execute(exec, *args, decode=True):
-    res = subprocess.check_output([exec, *args])
+def execute(exec, *args, decode=False, output_path=None):
+    exe_exception = None
+
+    try:
+        exec_output = subprocess.check_output([exec, *args])
+    except subprocess.CalledProcessError as e:
+        exec_output = e.output
+        exe_exception = e
+
     if decode:
-        res = res.decode('utf-8')
-    return res
+        exec_output = exec_output.decode('utf-8')
+
+    if output_path is not None:
+        with open(output_path, "wb") as output:
+            output.write(exec_output)
+
+    if exe_exception is not None:
+        raise exe_exception
+
+    return exec_output
 
 
 if __name__ == '__main__':
@@ -33,7 +48,8 @@ if __name__ == '__main__':
     repository_name = "GPGPUCourse/GPGPUTasks2020"
 
     task_to_exec = {
-        "task01": ["aplusb"]
+        "task01": ["aplusb"],
+        "task03": ["mandelbrot", "sum", "max_prefix_sum"],
     }
 
     pr_ignore_list_filename = root_dir / "input/pr_ignore_list.txt"
@@ -44,7 +60,7 @@ if __name__ == '__main__':
     cmake_init_params = ["-G", "Visual Studio 16 2019", "-A", "x64", ".."]
     cmake_build_params = ["-j", "8", "--config", "Release"]
 
-    cmake_version_output = execute(cmake_exe, "--version")
+    cmake_version_output = execute(cmake_exe, "--version", decode=True)
     print(cmake_version_output)
 
     with open(pr_ignore_list_filename) as input:
@@ -112,22 +128,17 @@ if __name__ == '__main__':
         print("    building...")
         os.chdir(build_dir)
 
-        cmake_init_output = execute(cmake_exe, *cmake_init_params)
+        print("      cmake init...")
         cmake_init_output_path = output_path.format(task=task, username=username, output="cmake_init")
-        print("    cmake init output: {}".format(cmake_init_output_path))
-        with open(cmake_init_output_path, "w") as output:
-            output.writelines(cmake_init_output)
+        cmake_init_output = execute(cmake_exe, *cmake_init_params, output_path=cmake_init_output_path)
 
-        cmake_build_output = execute(cmake_exe, "--build", str(build_dir), *cmake_build_params)
+        print("      cmake build...")
         cmake_build_output_path = output_path.format(task=task, username=username, output="cmake_build")
-        print("    cmake build output: {}".format(cmake_build_output_path))
-        with open(cmake_build_output_path, "w") as output:
-            output.writelines(cmake_build_output)
+        cmake_build_output = execute(cmake_exe, "--build", str(build_dir), *cmake_build_params, output_path=cmake_build_output_path)
 
+        print("  executing...")
         for exec_name in task_to_exec[task]:
             os.chdir(repo_dir)
-            exec_output = execute("build/Release/{}.exe".format(exec_name), decode=False)
+            print("    ./{}.exe...".format(exec_name))
             exec_output_path = output_path.format(task=task, username=username, output="exe_{}".format(exec_name))
-            print("    {}.exe output: {}".format(exec_name, exec_output_path))
-            with open(exec_output_path, "wb") as output:
-                output.write(exec_output)
+            execute("build/Release/{}.exe".format(exec_name), output_path=exec_output_path)
