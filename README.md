@@ -45,7 +45,7 @@
 ```C++
 __kernel do_some_work()
 {
-    assert(get_group_id == [256, 1, 1]);
+    assert(get_group_size == [256, 1, 1]);
 
     __local disjoint_set = ...;
 
