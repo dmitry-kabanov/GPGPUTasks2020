@@ -52,6 +52,7 @@ if __name__ == '__main__':
         "task01": ["aplusb"],
         "task03": ["mandelbrot", "sum", "max_prefix_sum"],
         "task04": ["matrix_transpose", "matrix_multiplication"],
+        "task05": ["bitonic", "radix"],
     }
 
     pr_ignore_list_filename = root_dir / "input/pr_ignore_list.txt"
