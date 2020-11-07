@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import shutil
+import platform
 import traceback
 import subprocess
 from pathlib import Path
@@ -9,9 +10,27 @@ from pathlib import Path
 import git
 import requests
 
+github_api_token = ""
+
+if platform.system() == "Windows":
+    cmake_exe = "C:/Program Files/JetBrains/CLion 2020.1/bin/cmake/win/bin/cmake.exe"
+    cmake_init_params = ["-G", "Visual Studio 16 2019", "-A", "x64", ".."]
+    build_exe = cmake_exe
+    build_params = ["-j", "8", "--config", "Release"]
+    exec_path_template = "build/Release/{}.exe"
+    exec_device_index = ["0"]
+elif platform.system() == "Linux":
+    cmake_exe = "/usr/bin/cmake"
+    cmake_init_params = ["-DCMAKE_BUILD_TYPE=RelWithDebInfo", ".."]
+    build_exe = "make"
+    build_params = ["-j8"]
+    exec_path_template = "build/{}"
+    exec_device_index = ["1"]
+else:
+    raise "Unsupported platform: {}".format(platform.system())
+
 
 def load_json(url):
-    github_api_token = ""
     data = requests.get(url, auth=('user', github_api_token)).text
     return json.loads(data)
 
@@ -59,10 +78,6 @@ if __name__ == '__main__':
     pr_ignore_list_filename = root_dir / "input/pr_ignore_list.txt"
     repos_dir = str(root_dir / "repos/{task}/{username}/")
     output_path = str(Path(repos_dir) / "{output}.txt")
-
-    cmake_exe = "C:/Program Files/JetBrains/CLion 2020.1/bin/cmake/win/bin/cmake.exe"
-    cmake_init_params = ["-G", "Visual Studio 16 2019", "-A", "x64", ".."]
-    cmake_build_params = ["-j", "8", "--config", "Release"]
 
     cmake_version_output = execute(cmake_exe, "--version", decode=True)
     print(cmake_version_output)
@@ -132,13 +147,13 @@ if __name__ == '__main__':
             cmake_init_output = execute(cmake_exe, *cmake_init_params, output_path=cmake_init_output_path)
             print("      cmake build...")
             cmake_build_output_path = output_path.format(task=task, username=username, output="cmake_build")
-            cmake_build_output = execute(cmake_exe, "--build", str(build_dir), *cmake_build_params,
+            cmake_build_output = execute(build_exe, *((["--build", str(build_dir)] if platform.system() == "Windows" else []) + build_params),
                                          output_path=cmake_build_output_path)
             print("  executing...")
             for exec_name in task_to_exec[task]:
                 os.chdir(repo_dir)
                 print("    ./{}.exe...".format(exec_name))
                 exec_output_path = output_path.format(task=task, username=username, output="exe_{}".format(exec_name))
-                execute("build/Release/{}.exe".format(exec_name), output_path=exec_output_path)
+                execute(exec_path_template.format(exec_name), *exec_device_index, output_path=exec_output_path)
         except Exception as e:
             print(traceback.format_exc())
