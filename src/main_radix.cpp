@@ -23,6 +23,28 @@ void raiseFail(const T &a, const T &b, std::string message, std::string filename
 
 #define EXPECT_THE_SAME(a, b, message) raiseFail(a, b, message, __FILE__, __LINE__)
 
+#ifdef CUDA_SUPPORT
+#define DECLARATION_SUFFIX     ;
+#else
+#define DECLARATION_SUFFIX     { throw std::runtime_error("CUDA_SUPPORT=OFF!"); }
+#endif
+
+void cuda_get_inverse_bit(const gpu::WorkSize &workSize,
+                          unsigned int* as, unsigned int* bit_array, const unsigned int n, const unsigned int bit,
+                          cudaStream_t stream) DECLARATION_SUFFIX
+
+void cuda_prefix_sum(const gpu::WorkSize &workSize,
+                     unsigned int* partial_sum, unsigned int* prefix_sum_ptr, const unsigned int n, const unsigned int pow,
+                     cudaStream_t stream) DECLARATION_SUFFIX
+
+void cuda_partial_sum(const gpu::WorkSize &workSize,
+                      unsigned int* cur_partial_sum, unsigned int* next_partial_sum, const unsigned int n,
+                      cudaStream_t stream) DECLARATION_SUFFIX
+
+void cuda_radix(const gpu::WorkSize &workSize,
+                unsigned int* cur_as, unsigned int* next_as, unsigned int* prefix_sum, const unsigned int n, const unsigned int bit,
+                cudaStream_t stream) DECLARATION_SUFFIX
+
 // See https://github.com/GPGPUCourse/GPGPUTasks2020/pull/214
 
 int main(int argc, char **argv)
@@ -30,7 +52,19 @@ int main(int argc, char **argv)
     gpu::Device device = gpu::chooseGPUDevice(argc, argv);
 
     gpu::Context context;
-    context.init(device.device_id_opencl);
+    bool is_cuda;
+#ifdef CUDA_SUPPORT
+    if (device.supports_cuda) {
+        context.init(device.device_id_cuda);
+        is_cuda = true;
+        std::cout << "Using API: CUDA" << std::endl;
+    } else 
+#endif
+    {
+        context.init(device.device_id_opencl);
+        is_cuda = false;
+        std::cout << "Using API: OpenCL" << std::endl;
+    }
     context.activate();
 
     int benchmarkingIters = 3;
@@ -60,13 +94,15 @@ int main(int argc, char **argv)
         gpu_sorted = as;
 
         ocl::Kernel get_inverse_bit(radix_kernel, radix_kernel_length, "get_inverse_bit");
-        get_inverse_bit.compile();
         ocl::Kernel prefix_sum_kernel(radix_kernel, radix_kernel_length, "prefix_sum");
-        prefix_sum_kernel.compile();
         ocl::Kernel partial_sum_kernel(radix_kernel, radix_kernel_length, "partial_sum");
-        partial_sum_kernel.compile();
         ocl::Kernel radix(radix_kernel, radix_kernel_length, "radix");
-        radix.compile();
+        if (!is_cuda) {
+            get_inverse_bit.compile();
+            prefix_sum_kernel.compile();
+            partial_sum_kernel.compile();
+            radix.compile();
+        }
 
         unsigned int workGroupSize = 128;
         unsigned int global_work_size = (n + workGroupSize - 1) / workGroupSize * workGroupSize;
@@ -88,16 +124,32 @@ int main(int argc, char **argv)
             initial_prefix_sum.writeN(zeros_array.data(), n);
             t.restart(); // Запускаем секундомер после прогрузки данных чтобы замерять время работы кернела, а не трансфер данных
             for(unsigned int bit = 0; bit <= std::log2(std::numeric_limits<int>::max())+1; ++bit) {
-                get_inverse_bit.exec(gpu::WorkSize(workGroupSize, global_work_size), cur_as, cur_partial_sum, n, bit);
+                if (is_cuda) {
+                    cuda_get_inverse_bit(gpu::WorkSize(workGroupSize, global_work_size), cur_as.cuptr(), cur_partial_sum.cuptr(), n, bit, context.cudaStream());
+                } else {
+                    get_inverse_bit.exec(gpu::WorkSize(workGroupSize, global_work_size), cur_as, cur_partial_sum, n, bit);
+                }
                 initial_prefix_sum.copyToN(prefix_sum, n);
                 unsigned int cur_size = global_work_size;
                 for (unsigned int pow = 0; pow <= std::log2(n); ++pow) {
-                    prefix_sum_kernel.exec(gpu::WorkSize(workGroupSize, global_work_size), cur_partial_sum, prefix_sum, n, pow);
+                    if (is_cuda) {
+                        cuda_prefix_sum(gpu::WorkSize(workGroupSize, global_work_size), cur_partial_sum.cuptr(), prefix_sum.cuptr(), n, pow, context.cudaStream());
+                    } else {
+                        prefix_sum_kernel.exec(gpu::WorkSize(workGroupSize, global_work_size), cur_partial_sum, prefix_sum, n, pow);
+                    }
                     cur_size /= 2;
-                    partial_sum_kernel.exec(gpu::WorkSize(workGroupSize, std::max(cur_size, workGroupSize)), cur_partial_sum, next_partial_sum, cur_size);
+                    if (is_cuda) {
+                        cuda_partial_sum(gpu::WorkSize(workGroupSize, std::max(cur_size, workGroupSize)), cur_partial_sum.cuptr(), next_partial_sum.cuptr(), cur_size, context.cudaStream());
+                    } else {
+                        partial_sum_kernel.exec(gpu::WorkSize(workGroupSize, std::max(cur_size, workGroupSize)), cur_partial_sum, next_partial_sum, cur_size);
+                    }
                     next_partial_sum.copyToN(cur_partial_sum, cur_size);
                 }
-                radix.exec(gpu::WorkSize(workGroupSize, global_work_size), cur_as, next_as, prefix_sum, n, bit);
+                if (is_cuda) {
+                    cuda_radix(gpu::WorkSize(workGroupSize, global_work_size), cur_as.cuptr(), next_as.cuptr(), prefix_sum.cuptr(), n, bit, context.cudaStream());
+                } else {
+                    radix.exec(gpu::WorkSize(workGroupSize, global_work_size), cur_as, next_as, prefix_sum, n, bit);
+                }
                 t.nextLap();
                 next_as.copyToN(cur_as, n);
             }
