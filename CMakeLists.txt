@@ -36,3 +36,11 @@ else()
 endif()
 
 target_link_libraries(${PROJECT_NAME} libclew libgpu libutils)
+
+# Как дополнительный пример предложен radix sort из https://github.com/GPGPUCourse/GPGPUTasks2020/pull/214
+convertIntoHeader(src/cl/radix_sort.cl src/cl/radix_cl.h radix_kernel)
+set(SOURCES src/main_radix.cpp src/cl/radix_cl.h)
+
+add_executable(radix_cuda ${SOURCES})
+
+target_link_libraries(radix_cuda libclew libgpu libutils)
